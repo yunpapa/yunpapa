@@ -1,11 +1,13 @@
-import base64
 import json
 import re
+from datetime import date
 from pathlib import Path
-from langchain_upstage import ChatUpstage
-from langchain_core.messages import HumanMessage
 
-SYSTEM_PROMPT = """당신은 영수증 OCR 전문가입니다. 이미지에서 영수증 정보를 추출하여 반드시 아래 JSON 형식으로만 응답하세요.
+from langchain_upstage import ChatUpstage, UpstageDocumentParseLoader
+from langchain_core.messages import HumanMessage, SystemMessage
+
+EXTRACT_PROMPT = """아래는 영수증에서 추출한 텍스트입니다.
+이 텍스트를 분석하여 반드시 아래 JSON 형식으로만 응답하세요. JSON 외 텍스트는 절대 출력하지 마세요.
 
 {
   "date": "YYYY-MM-DD",
@@ -17,47 +19,52 @@ SYSTEM_PROMPT = """당신은 영수증 OCR 전문가입니다. 이미지에서 �
   "category": "카테고리"
 }
 
-카테고리는 식료품/외식/쇼핑/교통/의료/문화/여가/통신/기타 중 하나.
-날짜를 파악할 수 없으면 오늘 날짜를 사용하세요.
-금액은 숫자만 (쉼표, 원 기호 제외).
-JSON 외 다른 텍스트는 절대 출력하지 마세요."""
+규칙:
+- 날짜: YYYY-MM-DD 형식. 파악 불가 시 오늘 날짜 사용.
+- 금액: 숫자만 (쉼표, 원 기호 제외).
+- category: 식료품 / 외식 / 쇼핑 / 교통 / 의료 / 문화/여가 / 통신 / 기타 중 하나.
+- 상품 항목이 없으면 items는 빈 배열 [].
+
+영수증 텍스트:
+"""
 
 
 async def analyze_receipt(image_path: str, api_key: str) -> dict:
-    """영수증 이미지를 분석하여 구조화된 JSON 반환"""
+    """
+    1단계: UpstageDocumentParseLoader로 영수증 이미지에서 텍스트 추출
+    2단계: ChatUpstage(solar-pro)로 텍스트를 구조화된 JSON으로 변환
+    """
     path = Path(image_path)
+    today = date.today().isoformat()
 
-    # 파일을 base64로 인코딩
-    with open(path, "rb") as f:
-        image_data = base64.b64encode(f.read()).decode("utf-8")
+    # ── 1단계: Document Parse ────────────────────────────────────────
+    loader = UpstageDocumentParseLoader(
+        file_path=str(path),
+        api_key=api_key,
+        split="none",
+        output_format="text",
+    )
+    # load()는 동기 함수 — executor로 감싸지 않고 직접 호출
+    docs = loader.load()
+    extracted_text = "\n".join(doc.page_content for doc in docs).strip()
 
-    # MIME 타입 결정
-    suffix = path.suffix.lower()
-    mime_map = {
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png": "image/png",
-        ".pdf": "application/pdf",
-    }
-    mime_type = mime_map.get(suffix, "image/jpeg")
+    if not extracted_text:
+        extracted_text = "(텍스트 추출 실패 — 영수증 정보를 최대한 추정하세요)"
 
+    # ── 2단계: ChatUpstage로 JSON 구조화 ────────────────────────────
     llm = ChatUpstage(api_key=api_key, model="solar-pro")
 
-    message = HumanMessage(
-        content=[
-            {"type": "text", "text": SYSTEM_PROMPT},
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime_type};base64,{image_data}"},
-            },
-        ]
-    )
+    messages = [
+        SystemMessage(content=f"오늘 날짜는 {today}입니다."),
+        HumanMessage(content=EXTRACT_PROMPT + extracted_text),
+    ]
 
-    response = await llm.ainvoke([message])
+    response = await llm.ainvoke(messages)
     content = response.content.strip()
 
-    # JSON 추출 (```json ... ``` 블록 처리)
+    # JSON 블록 추출 (```json ... ``` 포함 처리)
     json_match = re.search(r"\{.*\}", content, re.DOTALL)
     if json_match:
         return json.loads(json_match.group())
+
     raise ValueError(f"OCR 응답에서 JSON을 파싱할 수 없습니다: {content}")

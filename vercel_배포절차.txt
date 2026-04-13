@@ -1,0 +1,11 @@
+Vercel 배포 절차
+
+  프론트엔드 (Vercel에서 직접 배포 가능)
+  1. Vercel → New Project → yunpapa/yunpapa 연결
+  2. Root Directory: frontend
+  3. 환경변수 추가: VITE_API_BASE_URL=https://your-backend.vercel.app
+
+  백엔드 (별도 Vercel 프로젝트)
+  1. Vercel → New Project → 동일 레포 연결
+  2. Root Directory: backend
+  3. 환경변수 추가:
