@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# FastAPI / SQLite
+backend/receipt.db
+backend/uploads/
+backend/.env
+
+# Node.js
+node_modules/
+frontend/dist/
+frontend/.env
+
+# 환경 변수
+.env
+*.env
+
+# Claude Code
+.claude/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
